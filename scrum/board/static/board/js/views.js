@@ -216,6 +216,13 @@
         tagName: 'section',
         className: 'status',
         templateName: '#status-template',
+        events: {
+            'click button.add': 'renderAddForm',
+            'dragenter': 'enter',
+            'dragover': 'over',
+            'dragleave': 'leave',
+            'drop': 'drop'
+        },
         initialize: function (options) {
             TemplateView.prototype.initialize.apply(this, arguments);
             this.sprint = options.sprint;
@@ -238,6 +245,29 @@
         },
         addTask: function (view) {
             $('.list', this.$el).append(view.el);
+        },
+        enter: function (event) {
+            event.originalEvent.dataTranfer.effectAllowed = 'move';
+            event.preventDefault();
+            this.$el.addClass('over');
+        },
+        over: function (event) {
+            event.originalEvent.dataTransfer.dropEffect = 'move';
+            event.preventDefault();
+            return false;
+        },
+        leave: function (event) {
+            this.$el.removeClass('over');
+        },
+        drop: function (event) {
+            var dataTransfer = event.originalEvent.dataTransfer,
+                task = dataTransfer.getData('application/model');
+            if (event.stopPropagation){
+                event.stopPropagation();
+            }
+            // TODO: Handle changing the task status.
+            this.trigger('drop', task);
+            this.leave();
         }
     });
 
@@ -303,7 +333,16 @@
         className: 'task-item',
         templateName: '#task-item-template',
         events: {
-            'click': 'details'
+            'click': 'details',
+            'dragstart': 'start',
+            'dragenter': 'enter',
+            'dragover': 'over',
+            'dragleave': 'leave',
+            'dragend': 'end',
+            'drop': 'drop'
+        },
+        attributes:{
+            draggable: true
         },
         initialize: function (options) {
             TemplateView.prototype.initialize.apply(this, arguments);
@@ -326,6 +365,42 @@
             view.on('done', function () {
                 this.$el.show();
             }, this);
+        },
+        start: function (event) {
+            var dataTransfer = event.originalEvent.dataTransfer;
+            dataTransfer.effectAllowed = 'move';
+            dataTransfer.setData('application/model', this.task.get('id'));
+            this.trigger('dragstart', this.task);
+        },
+        enter: function (event) {
+            event.originalEvent.dataTranfer.effectAllowed = 'move';
+            event.preventDefault();
+            this.$el.addClass('over');
+        },
+        over: function (event) {
+            event.originalEvent.dataTransfer.dropEffect = 'move';
+            event.preventDefault();
+            return false;
+        },
+        end: function (event) {
+            this.trigger('dragend', this.task);
+        },
+        leave: function (event) {
+            this.$el.removeClass('over');
+        },
+        drop: function (event) {
+            var dataTransfer = event.originalEvent.dataTransfer,
+                task = dataTransfer.getDate('application/model');
+            if (event.stopPropagation){
+                event.stopPropagation();
+            }
+            task = app.tasks.get(task);
+            if (task !== this.task) {
+                // TODO: Handle reordering task.
+            }
+            this.trigger('drop',task);
+            this.leave();
+            return false;
         }
     });
 
@@ -349,6 +424,15 @@
                 done: new StatusView({
                     sprint: this.sprintId, status: 4, title: 'Completed'})
             };
+            _.each(this.statuses, function (view, name) {
+                view.on('drop', function (model) {
+                    this.socket.send({
+                        model: 'task',
+                        id: model.get('id'),
+                        action: 'drop'
+                    });
+                }, this);
+            }, this);
             this.socket = null;
             app.collections.ready.done(function () {
                 app.tasks.on('add', self.addTask, self);
@@ -400,6 +484,27 @@
                 }
             });
             view.render();
+            view.on('dragstart', function (model) {
+                this.socket.send({
+                    model: 'task',
+                    id: model.get('id'),
+                    action: 'dragstart'
+                });
+            }, this);
+            view.on('dragend', function (model) {
+                this.socket.send({
+                    model: 'task',
+                    id: model.get('id'),
+                    action: 'dragend'
+                });
+            }, this);
+            view.on('drop',function (model) {
+                this.socket.send({
+                    model: 'task',
+                    id: model.get('id'),
+                    action: 'drop'
+                });
+            }, this);
             return view;
         },
         connectSocket: function () {
