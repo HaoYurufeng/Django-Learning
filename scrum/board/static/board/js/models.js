@@ -114,8 +114,36 @@
         },
         inSprint: function (sprint) {
             return sprint.get('id') == this.get('sprint');
+        },
+        /*对任务状态以及时间判定，针对任务时间更新和状态不一致，进行判断然后对任务信息进行更新修改*/
+        moveTo: function (status, sprint, order) {
+            var updates = {
+                status: status,
+                sprint: sprint,
+                order: order
+            },
+                today = new Date().toISOString().replace(/T.*/g, '');
+            // Backlog Tasks
+            if (!updates.sprint) {
+                // Tasks moved back to the Backlog
+                updates.status = -1;
+            }
+            // Started Tasks
+            if ((updates.status ===2 ) || (updates.status > 2 && !this.get('started'))) {
+                updates.started = today;
+            } else if (updates.status < 2 && this.get('started')) {
+                updates.started = null;
+            }
+            // Complete Tasks
+            if (updates.status === 4) {
+                updates.completed = today;
+            } else if (updates.status < 4 && this.get('completed')) {
+                updates.completed = null;
+            }
+            this.save(updates);
         }
     });
+
     app.models.User = BaseModel.extend({});
 
     var BaseCollection = Backbone.Collection.extend({
