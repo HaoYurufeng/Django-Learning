@@ -401,6 +401,12 @@
             this.trigger('drop',task);
             this.leave();
             return false;
+        },
+        lock: function () {
+            this.$el.addClass('locked');
+        },
+        unlock: function () {
+            this.$el.removeClass('locked');
         }
     });
 
@@ -511,6 +517,18 @@
             var links = this.sprint && this.sprint.get('links');
             if (links && links.channel){
                 this.socket = new app.Socket(links.channel);
+                this.socket.on('task: dragstart', function (task) {
+                    var view = this.tasks[task];
+                    if (view) {
+                        view.lock();
+                    }
+                }, this);
+                this.socket.on('task: dragend task: drop', function (task) {
+                    var view = this.tasks[task];
+                    if (view) {
+                        view.unlock();
+                    }
+                }, this);
             }
         },
         remove: function () {

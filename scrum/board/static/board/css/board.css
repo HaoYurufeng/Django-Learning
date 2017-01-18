@@ -213,3 +213,7 @@ header nav a:hover{
     opacity: 0.5;
     border: 1px black dotted;
 }
+
+.tasks .task-item.locked {
+    opacity: 0.5;
+}
