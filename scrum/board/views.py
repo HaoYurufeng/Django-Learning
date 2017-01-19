@@ -1,8 +1,11 @@
 import requests
+import hashlib
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.signing import TimestampSigner
 from rest_framework import viewsets, authentication, permissions, filters
+from rest_framework.renderers import JSONRenderer
 from .models import Sprint, Task
 from .serializers import SprintSerializer, TaskSerializer, UserSerializer
 from .forms import TaskFilter, SprintFilter
@@ -44,8 +47,21 @@ class UpdateHookMixin(object):
 
     def _send_hook_request(self, obj, method):
         url = self._build_hook_url(obj)
+        if method in ('POST', 'PUT'):
+            # Build the body
+            serializer = self.get_serializer(obj)
+            renderer = JSONRenderer()
+            context = {'request': self.request}
+            body = renderer.render(serializer.data, renderer_context=context)
+        else:
+            body = None
+        headers = {
+            'content-type': 'application/json',
+            'X-Signature': self._build_hook_signature(method, url, body)
+        }
         try:
-            response = requests.request(method, url, timeout=0.5)
+            response = requests.request(method, url,
+                                        data=body, timeout=0.5, headers=headers)
             response.raise_for_status()
         except requests.exceptions.ConnectionError:
             # Host could not be resolved or the connection was refused
@@ -56,6 +72,15 @@ class UpdateHookMixin(object):
         except requests.exceptions.RequestException:
             # Sever responsed with 4XX or 5XX status code
             pass
+
+    def _build_hook_signature(self, method, url, body):
+        signer = TimestampSigner(settings.WATERCOOLER_SECRET)
+        value = '{method}:{url}:{body}'.format(
+            method=method.lower(),
+            url=url,
+            body=hashlib.sha256(body or b'').hexdigest()
+        )
+        return signer.sign(value)
 
     def perform_create(self, serializer):
         super().perform_create(serializer)
