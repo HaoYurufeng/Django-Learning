@@ -1,4 +1,6 @@
-from django.shortcuts import render
+import requests
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from rest_framework import viewsets, authentication, permissions, filters
 from .models import Sprint, Task
@@ -29,7 +31,45 @@ class DefaultsMixin(object):
         filters.OrderingFilter,
     )
 
-class SprintViewSet(viewsets.ModelViewSet):
+class UpdateHookMixin(object):
+    """Mixin class to send update information to the websocket server."""
+    def _build_hook_url(self, obj):
+        if isinstance(obj, User):
+            model = 'user'
+        else:
+            model = obj.__class__.__name__.lower()
+        return '{}://{}/{}/{}'.format(
+            'https' if settings.WATERCOOLER_SECURE else 'http',
+            settings.WATERCOOLER_SERVER, model, obj.pk)
+
+    def _send_hook_request(self, obj, method):
+        url = self._build_hook_url(obj)
+        try:
+            response = requests.request(method, url, timeout=0.5)
+            response.raise_for_status()
+        except requests.exceptions.ConnectionError:
+            # Host could not be resolved or the connection was refused
+            pass
+        except requests.exceptions.Timeout:
+            # Request timed out
+            pass
+        except requests.exceptions.RequestException:
+            # Sever responsed with 4XX or 5XX status code
+            pass
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        self._send_hook_request(serializer.instance, 'POST')
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        self._send_hook_request(serializer.instance, 'PUT')
+
+    def perform_destory(self, instance):
+        self._send_hook_request(instance, 'DELETE')
+        super().perform_destory(instance)
+
+class SprintViewSet(DefaultsMixin, UpdateHookMixin, viewsets.ModelViewSet):
     """API endpoint for listing and creating sprints."""
 
     queryset = Sprint.objects.order_by('end')
@@ -43,7 +83,7 @@ class SprintViewSet(viewsets.ModelViewSet):
     """将ordering_fields添加到视图，可以根据需要按某些列排序。"""
     ordering_fields = ('end', 'name',)
 
-class TaskViewSet(DefaultsMixin, viewsets.ModelViewSet):
+class TaskViewSet(DefaultsMixin, UpdateHookMixin, viewsets.ModelViewSet):
     """API endpoint for listing and creating tasks."""
 
     queryset = Task.objects.all()

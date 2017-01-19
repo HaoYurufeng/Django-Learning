@@ -1,3 +1,4 @@
+import json
 import logging
 import signal
 import time
@@ -8,7 +9,7 @@ from urllib.parse import urlparse
 from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
 from tornado.options import define, parse_command_line, options
-from tornado.web import Application
+from tornado.web import Application, RequestHandler
 from tornado.websocket import WebSocketHandler, WebSocketClosedError
 
 define('debug', default=False, type=bool, help='Run in debug mode')
@@ -38,11 +39,33 @@ class SprintHandler(WebSocketHandler):
         """Remove subscription."""
         self.application.remove_subscriber(self.sprint, self)
 
+class UpdateHandler(RequestHandler):
+    """Handle updates from the Django application."""
+
+    def post(self, model, pk):
+        self._broadcast(model, pk, 'add')
+
+    def put(self, model, pk):
+        self._broadcast(model, pk, 'update')
+
+    def delete(self, model, pk):
+        self._broadcast(model, pk, 'remove')
+
+    def _broadcast(self, model, pk, action):
+        message = json.dumps({
+            'model': model,
+            'pk': pk,
+            'action': action,
+        })
+        self.application.broadcast(message)
+        self.write("OK")
+
 class ScrumApplication(Application):
 
     def __init__(self, **kwargs):
         routes = [
             (r'/(?P<script>[0-9]+)', SprintHandler),
+            (r'/(?P<model>task|sprint|user)/(?<pk>[0-9]+)', UpdateHandler),
         ]
         super().__init__(routes, **kwargs)
         self.subscriptions = defaultdict(list)
