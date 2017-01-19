@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.signing import TimestampSigner
 from django.utils.translation import ugettext_lazy as _
 from rest_framework import serializers
 from rest_framework.reverse import reverse
@@ -19,13 +20,15 @@ class SprintSerializer(serializers.ModelSerializer):
 
     def get_links(self, obj):
         request = self.context['request']
+        signer = TimestampSigner(settings.WATERCOOLER_SECRET)
+        channel = signer.sign(obj.pk)
         return {
             'self': reverse('sprint-detail',
                             kwargs={'pk': obj.pk}, request=request),
             'tasks': reverse('task-list', request=request) + '?sprint={}'.format(obj.pk),
             'channel': '{proto}://{server}/{channel}'.format(
                 proto='wss' if settings.WATERCOOLER_SECURE else 'ws',
-                server=settings.WATERCOOLER_SERVER, channel=obj.pk),
+                server=settings.WATERCOOLER_SERVER, channel=channel),
         }
 
     def validate_end(self, value):

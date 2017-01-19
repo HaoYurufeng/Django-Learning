@@ -1,11 +1,12 @@
 import json
 import logging
+import os
 import signal
 import time
 import uuid
 
 from urllib.parse import urlparse
-
+from django.core.signing import TimestampSigner, BadSignature, SignatureExpired
 from redis import Redis
 from tornado.httpserver import HTTPServer
 from tornado.ioloop import IOLoop
@@ -51,18 +52,29 @@ class SprintHandler(WebSocketHandler):
 
     def open(self, sprint):
         """Subscribe to sprint updates on a new connection."""
-        # TODO:Validate sprint
-        self.sprint = sprint.decode('utf-8')
-        self.uid = uuid.uuid4().hex
-        self.application.add_subscriber(self.sprint, self)
+        # Validate sprint
+        self.sprint = None
+        channel = self.get_argument('channel', None)
+        if not channel:
+            self.close()
+        else:
+            try:
+                self.sprint = self.application.signer.unsign(channel, max_age=60*30)
+            except (BadSignature, SignatureExpired):
+                self.close()
+            else:
+                self.uid = uuid.uuid4().hex
+                self.application.add_subscriber(self.sprint, self)
 
     def on_message(self, message):
         """Broadcast updates to other interested clients."""
-        self.application.broadcast(message, channel=self.sprint, sender=self)
+        if self.sprint is not None:
+            self.application.broadcast(message, channel=self.sprint, sender=self)
 
     def on_close(self):
         """Remove subscription."""
-        self.application.remove_subscriber(self.sprint, self)
+        if self.sprint is not None:
+            self.application.remove_subscriber(self.sprint, self)
 
 class UpdateHandler(RequestHandler):
     """Handle updates from the Django application."""
@@ -93,8 +105,11 @@ class ScrumApplication(Application):
             (r'/(?P<model>task|sprint|user)/(?<pk>[0-9]+)', UpdateHandler),
         ]
         super().__init__(routes, **kwargs)
-        self.subscriber = RedisSubscriber(Client)
+        self.subscriber = RedisSubscriber(Client())
         self.publisher = Redis()
+        self._key = os.environ.get('WATERCOOLER_SECRET',
+                                   'fydusglaufakldjfgasklhfafioewhfoiahskfha')
+        self.signer = TimestampSigner(self._key)
 
     def broadcast(self, message, channel=None, sender=None):
         channel = 'all' if channel is None else channel
